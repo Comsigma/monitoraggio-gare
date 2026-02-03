@@ -1,5 +1,6 @@
 import requests
 import os
+import urllib.parse
 
 # Configurazioni dalle impostazioni GitHub
 TOKEN = os.getenv('TELEGRAM_TOKEN')
@@ -17,26 +18,41 @@ def salva_in_archivio(gara_id):
         f.write(gara_id + "\n")
 
 def cerca_gare_italia():
-    keywords = ["monitoraggio strutturale", "diagnostica", "vulnerabilità sismica", "ponti", "viadotti", "indagini solai", "prove di carico"]
+    # Parole chiave per la ricerca professionale
+    query_base = '("monitoraggio strutturale" OR "diagnostica strutturale" OR "indagini solai" OR "vulnerabilità sismica") AND "gara"'
+    
+    # Codifica la query per l'URL
+    query_encoded = urllib.parse.quote(query_base)
+    # Interroghiamo il feed RSS di Google News (molto più stabile dello scraping)
+    rss_url = f"https://news.google.com/rss/search?q={query_encoded}&hl=it&gl=IT&ceid=IT:it"
+    
+    print(f"Scansione in corso su: {rss_url}")
     archivio = leggi_archivio()
     
-    # Esempio di risultati (qui andrà la logica di scraping reale)
-    risultati_reali = [
-        {"id": "anas_003", "titolo": "Monitoraggio ponti stradali", "ente": "ANAS", "link": "https://link1.it"},
-        {"id": "sintel_101", "titolo": "Diagnostica strutturale edifici", "ente": "SINTEL", "link": "https://link2.it"}
-    ]
+    try:
+        response = requests.get(rss_url)
+        # Analisi semplice del feed RSS
+        from xml.etree import ElementTree
+        root = ElementTree.fromstring(response.content)
+        
+        for item in root.findall('.//item'):
+            titolo = item.find('title').text
+            link = item.find('link').text
+            # Usiamo il link come ID unico (o parte di esso)
+            gara_id = item.find('guid').text if item.find('guid') is not None else link
+            
+            if gara_id not in archivio:
+                invio_messaggio(titolo, link)
+                salva_in_archivio(gara_id)
+                print(f"Inviata nuova gara: {titolo}")
+                
+    except Exception as e:
+        print(f"Errore durante la scansione: {e}")
 
-    for gara in risultati_reali:
-        # Verifica se la gara è pertinente E non è già stata inviata
-        if any(key in gara['titolo'].lower() for key in keywords) and gara['id'] not in archivio:
-            invio_messaggio(gara)
-            salva_in_archivio(gara['id'])
-
-def invio_messaggio(gara):
-    testo = (f"🎯 **NUOVA GARA RILEVATA**\n\n"
-             f"📌 **Oggetto:** {gara['titolo']}\n"
-             f"🏛 **Ente:** {gara['ente']}\n"
-             f"🔗 [Accedi alla Piattaforma]({gara['link']})")
+def invio_messaggio(titolo, link):
+    testo = (f"🎯 **POTENZIALE GARA RILEVATA**\n\n"
+             f"📌 **Titolo:** {titolo}\n\n"
+             f"🔗 [Leggi la notizia/bando]({link})")
     
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
     payload = {"chat_id": CHAT_ID, "text": testo, "parse_mode": "Markdown"}
@@ -44,5 +60,3 @@ def invio_messaggio(gara):
 
 if __name__ == "__main__":
     cerca_gare_italia()
-
-
