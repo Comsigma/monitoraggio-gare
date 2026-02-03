@@ -1,7 +1,7 @@
 name: Scan Settimanale Gare
 on:
   schedule:
-    - cron: '0 8 * * 1' # Scatta ogni lunedì alle 08:00
+    - cron: '0 8 * * 1,4' # Scatta ogni lunedì alle 08:00
   workflow_dispatch:   # Questo comando ti permette di avviarlo a mano per test
 
 jobs:
