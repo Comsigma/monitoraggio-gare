@@ -1,1 +1,22 @@
+name: Scan Settimanale Gare
+on:
+  schedule:
+    - cron: '0 8 * * 1' # Scatta ogni lunedì alle 08:00
+  workflow_dispatch:   # Questo comando ti permette di avviarlo a mano per test
 
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+      - name: Install dependencies
+        run: pip install requests
+      - name: Run script
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python tender_bot.py
