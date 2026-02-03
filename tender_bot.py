@@ -22,8 +22,8 @@ def cerca_gare_italia():
     
     # Esempio di risultati (qui andrà la logica di scraping reale)
     risultati_reali = [
-        {"id": "anas_002", "titolo": "Monitoraggio Ponti SS1", "ente": "ANAS", "link": "https://acquisti.stradeanas.it/"},
-        {"id": "sintel_100", "titolo": "Verifica sismica scuole", "ente": "Provincia di Brescia", "link": "https://www.sintel.it/"}
+        {"id": "anas_003", "titolo": "Monitoraggio ponti stradali", "ente": "ANAS", "link": "https://link1.it"},
+        {"id": "sintel_101", "titolo": "Diagnostica strutturale edifici", "ente": "SINTEL", "link": "https://link2.it"}
     ]
 
     for gara in risultati_reali:
@@ -44,4 +44,5 @@ def invio_messaggio(gara):
 
 if __name__ == "__main__":
     cerca_gare_italia()
+
 
