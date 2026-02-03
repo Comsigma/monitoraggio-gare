@@ -1,18 +1,19 @@
 name: Scan Settimanale Gare
+
 on:
   schedule:
-    - cron: '0 8 * * 1,4' # Scatta ogni lunedì e giovedì alle 08:00 UTC
-  workflow_dispatch:      # Permette l'avvio manuale per fare i test
+    - cron: '0 8 * * 1,4'
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    # Permessi necessari per permettere all'agente di scrivere nel repository
     permissions:
       contents: write
       
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout repository
+        uses: actions/checkout@v3
         with:
           persist-credentials: true
 
@@ -34,9 +35,7 @@ jobs:
         run: |
           git config --global user.name 'GitHub Action'
           git config --global user.email 'action@github.com'
-          # Crea il file se non esiste per evitare errori al primo avvio
           touch gare_inviate.txt 
           git add gare_inviate.txt
-          # Esegue il commit solo se ci sono nuovi ID salvati
-          git commit -m "Aggiornamento archivio gare inviate" || echo "Nessun nuovo bando da archiviare"
+          git commit -m "Aggiornamento archivio" || echo "No changes"
           git push
