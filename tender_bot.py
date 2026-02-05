@@ -1,6 +1,7 @@
 import requests
 import os
-from datetime import datetime, timedelta
+import urllib.parse
+from xml.etree import ElementTree
 
 TOKEN = os.getenv('TELEGRAM_TOKEN')
 CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
@@ -13,64 +14,67 @@ def leggi_archivio():
 def salva_in_archivio(gara_id):
     with open(DB_FILE, "a") as f: f.write(str(gara_id) + "\n")
 
-def cerca_gare_anac():
-    keywords = [
-        "diagnostica strutturale", "prove di carico", "indagini ponti", 
-        "martinetti piatti", "vulnerabilità sismica", "valutazione sicurezza"
+def cerca_gare_laser():
+    # 1. ESCLUSIONI TOTALI (Se c'è una di queste, il bot ignora tutto)
+    blacklist_assoluta = [
+        "sanitaria", "medica", "clinica", "ospedale", "asl", "paziente", 
+        "salute", "farmaceutica", "coronavirus", "covid", "diagnosi medica",
+        "corriere", "repubblica", "ansa", "sole24ore", "ingenio", "facebook", "linkedin"
     ]
     
-    archivio = leggi_archivio()
-    data_inizio = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+    # 2. QUERY CHIRURGICHE (Cerca solo su siti istituzionali e portali appalti)
+    # site:*.it limita la ricerca ai domini italiani
+    domini_target = "site:portaleappalti.it OR site:acquistinretepa.it OR site:arca.regione.lombardia.it OR site:gov.it"
     
-    # Intestazioni per "ingannare" il server e farci sembrare un browser normale
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-        'Accept': 'application/json, text/plain, */*',
-        'Referer': 'https://www.anticorruzione.it/it/pvl'
-    }
+    keyword_groups = [
+        '"diagnostica strutturale"',
+        '"prove di carico"',
+        '"indagini" AND "ponti"',
+        '"martinetti piatti"',
+        '"vulnerabilità sismica"',
+        '"valutazione sicurezza" AND "strutturale"'
+    ]
 
-    print(f"Tentativo di connessione profonda all'ANAC dal {data_inizio}...")
+    archivio = leggi_archivio()
+    print("Avvio ricerca con filtri anti-sanità...")
 
-    for kw in keywords:
-        # Usiamo l'endpoint PVL di ricerca
-        base_url = "https://www.anticorruzione.it/rest/api/v1/pvl"
-        params = {
-            'search': kw,
-            'dataPubblicazioneDa': data_inizio,
-            'status': 'PUBBLICATO'
-        }
+    for kw in keyword_groups:
+        # Costruiamo la query: (Siti Ufficiali) + (Keywords Ingegneria)
+        query = f"({domini_target}) {kw}"
+        query_encoded = urllib.parse.quote(query)
+        
+        # Usiamo il feed RSS di Google ma con filtri più pesanti
+        rss_url = f"https://news.google.com/rss/search?q={query_encoded}&hl=it&gl=IT&ceid=IT:it"
         
         try:
-            response = requests.get(base_url, params=params, headers=headers, timeout=30)
-            print(f"Ricerca per '{kw}': Risposta Server {response.status_code}")
+            response = requests.get(rss_url, timeout=20)
+            root = ElementTree.fromstring(response.content)
             
-            if response.status_code == 200:
-                gare = response.json().get('content', [])
-                print(f"Trovate {len(gare)} gare per '{kw}'")
+            for item in root.findall('.//item'):
+                titolo = item.find('title').text.lower()
+                link = item.find('link').text.lower()
+                gara_id = item.find('guid').text if item.find('guid') is not None else link
                 
-                for gara in gare:
-                    gara_id = gara.get('id')
-                    titolo = gara.get('oggetto', 'Senza Titolo')
-                    ente = gara.get('stazioneAppaltante', {}).get('denominazione', 'Ente Ignoto')
-                    link = f"https://www.anticorruzione.it/-/pvl-dettaglio/-/pvl/{gara_id}"
-                    
-                    if str(gara_id) not in archivio:
-                        invio_messaggio(titolo, ente, link)
-                        salva_in_archivio(gara_id)
-            else:
-                print(f"Il portale ANAC ha rifiutato la richiesta (Errore {response.status_code})")
-        
+                # --- FILTRO DI SICUREZZA ---
+                # Salta se trova termini medici o giornali
+                if any(parola in titolo or parola in link for parola in blacklist_assoluta):
+                    continue
+                
+                # Accetta solo se è un bando/gara o se proviene da un sito ufficiale
+                is_official = any(x in link for x in ["portaleappalti", "acquistinretepa", "arca.", "gov.it"])
+                is_bando = any(x in titolo for x in ["bando", "gara", "appalto", "affidamento", "procedura"])
+                
+                if (is_official or is_bando) and gara_id not in archivio:
+                    invio_messaggio(item.find('title').text, item.find('link').text)
+                    salva_in_archivio(gara_id)
         except Exception as e:
-            print(f"Errore tecnico: {e}")
+            print(f"Errore su {kw}: {e}")
 
-def invio_messaggio(titolo, ente, link):
-    testo = (f"🏛 **GARA UFFICIALE ANAC**\n\n"
-             f"🏢 **Ente:** {ente}\n"
-             f"📌 **Oggetto:** {titolo[:200]}...\n\n"
-             f"🔗 [Vedi Bando]({link})")
-    
+def invio_messaggio(titolo, link):
+    titolo_pulito = titolo.split(" - ")[0]
+    testo = f"⚖️ **BANDO TECNICO FILTRATO**\n\n📌 {titolo_pulito}\n\n🔗 [Link al portale]({link})"
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
     requests.post(url, json={"chat_id": CHAT_ID, "text": testo, "parse_mode": "Markdown"})
 
 if __name__ == "__main__":
-    cerca_gare_anac()
+    cerca_gare_laser()
