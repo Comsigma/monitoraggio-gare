@@ -7,36 +7,34 @@ TOKEN = os.getenv('TELEGRAM_TOKEN')
 CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 DB_FILE = "gare_inviate.txt"
 
-def leggi_archivio():
-    if not os.path.exists(DB_FILE): return []
-    with open(DB_FILE, "r") as f: return f.read().splitlines()
+def invio_messaggio(testo):
+    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+    requests.post(url, json={"chat_id": CHAT_ID, "text": testo, "parse_mode": "Markdown", "disable_web_page_preview": True})
 
-def salva_in_archivio(gara_id):
-    with open(DB_FILE, "a") as f: f.write(str(gara_id) + "\n")
+def cerca_gare():
+    # 1. Messaggio di test iniziale
+    invio_messaggio("🚀 *Il Bot è partito!* Sto scansionando i portali...")
 
-def cerca_gare_pure():
-    # 1. PARAMETRI DI ESCLUSIONE (Se compaiono nel titolo o nel link, il bot scarta)
-    blacklist = [
-        "sanitaria", "medica", "clinica", "ospedale", "asl", "paziente", 
-        "farmaci", "radiologia", "salute", "terapia", "news", "articolo",
-        "cronaca", "incidente", "morto", "ferito", "arrestato"
+    # 2. Keywords semplificate per allargare di nuovo la rete
+    keywords = [
+        "diagnostica strutturale",
+        "prove di carico",
+        "indagini ponti",
+        "martinetti piatti",
+        "vulnerabilità sismica"
     ]
     
-    # 2. PARAMETRI DI OBBLIGO (Deve esserci almeno uno di questi termini tecnici)
-    whitelist_tecnica = ["cig", "cup", "disciplinare", "elenco prezzi", "bando", "affidamento", "procedura"]
+    # 3. Siti istituzionali sicuri
+    domini = "site:portaleappalti.it OR site:acquistinretepa.it OR site:arca.regione.lombardia.it OR site:gov.it"
+    
+    if not os.path.exists(DB_FILE): open(DB_FILE, 'w').close()
+    with open(DB_FILE, "r") as f: archivio = f.read().splitlines()
 
-    # 3. QUERY AVANZATE (Usiamo i Dork per forzare i siti istituzionali)
-    keyword_groups = [
-        'site:portaleappalti.it "manutenzione"',  # Test per sbloccare il bot
-        'site:it "diagnostica strutturale" (CIG OR CUP OR bando)',
-        # ... le altre tue parole chiave ...
-    ]
+    trovati_totali = 0
 
-    archivio = leggi_archivio()
-    print("Avvio scansione ad alta precisione...")
-
-    for kw in keyword_groups:
-        query_encoded = urllib.parse.quote(kw)
+    for kw in keywords:
+        query = f"({domini}) \"{kw}\""
+        query_encoded = urllib.parse.quote(query)
         rss_url = f"https://news.google.com/rss/search?q={query_encoded}&hl=it&gl=IT&ceid=IT:it"
         
         try:
@@ -44,34 +42,22 @@ def cerca_gare_pure():
             root = ElementTree.fromstring(response.content)
             
             for item in root.findall('.//item'):
-                titolo = item.find('title').text.lower()
-                link = item.find('link').text.lower()
-                gara_id = item.find('guid').text if item.find('guid') is not None else link
-                
-                # FILTRO A: Esclusione termini indesiderati
-                if any(bad in titolo or bad in link for bad in blacklist):
+                titolo = item.find('title').text
+                link = item.find('link').text
+                # Escludiamo sanità e giornali a livello di codice
+                if any(x in titolo.lower() for x in ["medica", "clinica", "ospedale", "asl", "news", "articolo"]):
                     continue
                 
-                # FILTRO B: Presenza di termini burocratici (Whitelist)
-                contiene_tecnicismi = any(good in titolo or good in link for good in whitelist_tecnica)
-                
-                # FILTRO C: Solo domini istituzionali o di gara
-                is_official = any(dom in link for dom in ["portaleappalti", "acquistinretepa", "arca.", "gov.it", "albofornitori", "trasparenza"])
-
-                if (is_official and contiene_tecnicismi) and gara_id not in archivio:
-                    invio_messaggio(item.find('title').text, item.find('link').text)
-                    salva_in_archivio(gara_id)
+                gara_id = item.find('guid').text if item.find('guid') is not None else link
+                if gara_id not in archivio:
+                    invio_messaggio(f"🏗 **NUOVA GARA RILEVATA**\n\n📌 {titolo}\n\n🔗 [Vai al bando]({link})")
+                    with open(DB_FILE, "a") as f: f.write(gara_id + "\n")
+                    trovati_totali += 1
         except Exception as e:
             print(f"Errore su {kw}: {e}")
 
-def invio_messaggio(titolo, link):
-    # Pulizia del titolo dal nome del sito
-    titolo_pulito = titolo.split(" - ")[0]
-    testo = f"🏗 **BANDO TECNICO RILEVATO**\n\n📌 {titolo_pulito}\n\n🔗 [Link alla Gara]({link})"
-    
-    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-    requests.post(url, json={"chat_id": CHAT_ID, "text": testo, "parse_mode": "Markdown"})
+    if trovati_totali == 0:
+        invio_messaggio("✅ Scansione completata: nessun nuovo bando pertinente trovato oggi.")
 
 if __name__ == "__main__":
-    cerca_gare_pure()
-
+    cerca_gare()
