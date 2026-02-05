@@ -15,29 +15,28 @@ def salva_in_archivio(gara_id):
     with open(DB_FILE, "a") as f: f.write(gara_id + "\n")
 
 def cerca_gare_italia():
-    # Solo domini ufficiali di gara
-    targets = "site:portaleappalti.it OR site:acquistinretepa.it OR site:arca.regione.lombardia.it OR site:empulia.it OR site:albofornitori.it"
-    
+    # Parole chiave professionali
     keyword_groups = [
         '"diagnostica" AND "strutturale"',
         '"prove" AND "carico"',
         '"indagini" AND "ponti" AND "viadotti"',
-        '"indagini" AND "strutturali"',
         '"martinetti" AND "piatti"',
-        '"valutazione" AND "statica"',
-        '"valutazione" AND "sismica"',
-        '"valutazione" AND "sicurezza"'
+        '"vulnerabilità" AND "sismica"',
+        '"valutazione" AND "sicurezza" AND "strutturale"'
     ]
     
-    # Parole che indicano che il link è un bando e NON una notizia
-    filtri_esclusione = ["notizie", "news", "articolo", "cronaca", "commento", "social"]
-    filtri_inclusione = ["gara", "bando", "disciplinare", "avviso", "appalto", "procedura", "affidamento", "trasparenza", "portale"]
+    # Siti da ESCLUDERE categoricamente (News e Blog)
+    blacklist = ["ilsole24ore.com", "ansa.it", "corriere.it", "repubblica.it", "ediltecnico.it", "ingenio-web.it", "facebook.com", "linkedin.com", "twitter.com"]
+    
+    # Parole che devono esserci (nel titolo o nel link) per essere un bando
+    whitelist = ["gara", "bando", "appalto", "procedura", "affidamento", "disciplinare", "portale", "trasparenza", "invito", "manifestazione"]
 
     archivio = leggi_archivio()
-    print("Scansione chirurgica avviata...")
+    print("Avvio ricerca equilibrata...")
 
     for keywords in keyword_groups:
-        query = f"({targets}) AND ({keywords})"
+        # Cerchiamo in tutto il web italiano (.it) escludendo i siti di news
+        query = f"{keywords} site:it"
         query_encoded = urllib.parse.quote(query)
         rss_url = f"https://news.google.com/rss/search?q={query_encoded}&hl=it&gl=IT&ceid=IT:it"
         
@@ -46,29 +45,27 @@ def cerca_gare_italia():
             root = ElementTree.fromstring(response.content)
             
             for item in root.findall('.//item'):
-                titolo = item.find('title').text.lower()
-                link = item.find('link').text.lower()
+                titolo = item.find('title').text
+                link = item.find('link').text
                 gara_id = item.find('guid').text if item.find('guid') is not None else link
                 
-                # --- LOGICA DI FILTRO AVANZATA ---
-                # 1. Escludiamo siti di news noti se scappano ai filtri site:
-                if any(word in link for word in filtri_esclusione):
+                # FILTRO 1: Salta se il link è in blacklist
+                if any(site in link.lower() for site in blacklist):
                     continue
                 
-                # 2. Verifichiamo che il link o il titolo sappiano di "burocratese" (Bando/Gara)
-                if any(word in link or word in titolo for word in filtri_inclusione):
-                    if gara_id not in archivio:
-                        invio_messaggio(item.find('title').text, item.find('link').text)
-                        salva_in_archivio(gara_id)
+                # FILTRO 2: Deve contenere almeno una parola della whitelist o essere un sito governativo
+                is_official = ".gov.it" in link or "portale" in link
+                has_keywords = any(word in titolo.lower() or word in link.lower() for word in whitelist)
+                
+                if (is_official or has_keywords) and gara_id not in archivio:
+                    invio_messaggio(titolo, link)
+                    salva_in_archivio(gara_id)
         except Exception as e:
-            print(f"Errore query {keywords}: {e}")
+            print(f"Errore: {e}")
 
 def invio_messaggio(titolo, link):
     titolo_pulito = titolo.split(" - ")[0]
-    testo = (f"⚖️ **BANDO TECNICO RILEVATO**\n\n"
-             f"📌 **Oggetto:** {titolo_pulito}\n\n"
-             f"🔗 [Documentazione Ufficiale]({link})")
-    
+    testo = f"🏛 **POTENZIALE GARA RILEVATA**\n\n📌 {titolo_pulito}\n\n🔗 [Link alla fonte]({link})"
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
     requests.post(url, json={"chat_id": CHAT_ID, "text": testo, "parse_mode": "Markdown"})
 
