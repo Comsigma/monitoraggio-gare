@@ -1,68 +1,53 @@
 import requests
 import os
-import urllib.parse
-from xml.etree import ElementTree
+from datetime import datetime, timedelta
 
-# Caricamento credenziali
 TOKEN = os.getenv('TELEGRAM_TOKEN')
 CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 DB_FILE = "gare_inviate.txt"
 
 def invio_messaggio(testo):
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-    try:
-        r = requests.post(url, json={"chat_id": CHAT_ID, "text": testo, "parse_mode": "Markdown", "disable_web_page_preview": True})
-        r.raise_for_status()
-    except Exception as e:
-        print(f"Errore invio Telegram: {e}")
+    requests.post(url, json={"chat_id": CHAT_ID, "text": testo, "parse_mode": "Markdown"})
 
-def cerca_gare():
-    # TEST IMMEDIATO: Se non ricevi questo, il problema sono i Secrets su GitHub
-    invio_messaggio("🔄 *Verifica collegamento:* Bot attivo. Inizio scansione...")
-
-    keywords = [
-        '"diagnostica strutturale"',
-        '"prove di carico"',
-        '"indagini su ponti"',
-        '"vulnerabilità sismica"'
-    ]
+def cerca_gare_anac():
+    invio_messaggio("🔍 *Avvio scansione ufficiale ANAC (Ultimi 30 gg)...*")
     
-    # Filtri di qualità
-    whitelist = ["portale", "bando", "gara", "appalto", "affidamento", "sintel", "arca", "acquistinrete", "trasparenza"]
-    blacklist = ["notizie", "news", "articolo", "clinica", "sanitaria", "ospedale", "asl"]
-
-    if not os.path.exists(DB_FILE):
-        with open(DB_FILE, 'w') as f: pass
+    # Parole chiave puramente ingegneristiche
+    keywords = ["diagnostica strutturale", "prove di carico", "indagini ponti", "vulnerabilità sismica", "martinetti piatti"]
     
-    with open(DB_FILE, "r") as f:
-        archivio = f.read().splitlines()
+    if not os.path.exists(DB_FILE): open(DB_FILE, 'w').close()
+    with open(DB_FILE, "r") as f: archivio = f.read().splitlines()
 
+    # Nuova API ANAC PVL (Pubblicità Valore Legale)
+    base_url = "https://www.anticorruzione.it/rest/api/v1/pvl"
+    data_inizio = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+    
     trovati = 0
+    headers = {'User-Agent': 'Mozilla/5.0'}
+
     for kw in keywords:
-        query = urllib.parse.quote(f"site:it {kw}")
-        rss_url = f"https://news.google.com/rss/search?q={query}&hl=it&gl=IT&ceid=IT:it"
-        
+        params = {'search': kw, 'dataPubblicazioneDa': data_inizio, 'status': 'PUBBLICATO'}
         try:
-            response = requests.get(rss_url, timeout=20)
-            root = ElementTree.fromstring(response.content)
-            
-            for item in root.findall('.//item'):
-                titolo = item.find('title').text
-                link = item.find('link').text.lower()
-                
-                # Filtro: deve contenere una parola della whitelist E nessuna della blacklist
-                if any(ok in link for ok in whitelist) and not any(no in link for no in blacklist):
-                    gara_id = item.find('guid').text if item.find('guid') is not None else link
-                    
+            response = requests.get(base_url, params=params, headers=headers, timeout=30)
+            if response.status_code == 200:
+                gare = response.json().get('content', [])
+                for gara in gare:
+                    gara_id = str(gara.get('id'))
                     if gara_id not in archivio:
-                        msg = f"🏛 **GARA SELEZIONATA**\n\n📌 {titolo}\n\n🔗 [Link Ufficiale]({item.find('link').text})"
+                        titolo = gara.get('oggetto', 'N/A')
+                        ente = gara.get('stazioneAppaltante', {}).get('denominazione', 'Ente Ignoto')
+                        link = f"https://www.anticorruzione.it/-/pvl-dettaglio/-/pvl/{gara_id}"
+                        
+                        msg = f"🏛 **NUOVO BANDO UFFICIALE ANAC**\n\n🏢 *Ente:* {ente}\n📌 *Oggetto:* {titolo[:300]}...\n🔗 [Dettaglio Gara]({link})"
                         invio_messaggio(msg)
+                        
                         with open(DB_FILE, "a") as f: f.write(gara_id + "\n")
                         trovati += 1
         except Exception as e:
-            print(f"Errore ricerca {kw}: {e}")
+            print(f"Errore su {kw}: {e}")
 
-    invio_messaggio(f"🏁 *Scansione terminata.* Nuovi bandi trovati: {trovati}")
+    invio_messaggio(f"🏁 *Scansione ANAC terminata.* Trovati: {trovati}")
 
 if __name__ == "__main__":
-    cerca_gare()
+    cerca_gare_anac()
