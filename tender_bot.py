@@ -14,36 +14,31 @@ def leggi_archivio():
 def salva_in_archivio(gara_id):
     with open(DB_FILE, "a") as f: f.write(str(gara_id) + "\n")
 
-def cerca_gare_laser():
-    # 1. ESCLUSIONI TOTALI (Se c'è una di queste, il bot ignora tutto)
-    blacklist_assoluta = [
+def cerca_gare_pure():
+    # 1. PARAMETRI DI ESCLUSIONE (Se compaiono nel titolo o nel link, il bot scarta)
+    blacklist = [
         "sanitaria", "medica", "clinica", "ospedale", "asl", "paziente", 
-        "salute", "farmaceutica", "coronavirus", "covid", "diagnosi medica",
-        "corriere", "repubblica", "ansa", "sole24ore", "ingenio", "facebook", "linkedin"
+        "farmaci", "radiologia", "salute", "terapia", "news", "articolo",
+        "cronaca", "incidente", "morto", "ferito", "arrestato"
     ]
     
-    # 2. QUERY CHIRURGICHE (Cerca solo su siti istituzionali e portali appalti)
-    # site:*.it limita la ricerca ai domini italiani
-    domini_target = "site:portaleappalti.it OR site:acquistinretepa.it OR site:arca.regione.lombardia.it OR site:gov.it"
-    
+    # 2. PARAMETRI DI OBBLIGO (Deve esserci almeno uno di questi termini tecnici)
+    whitelist_tecnica = ["cig", "cup", "disciplinare", "elenco prezzi", "bando", "affidamento", "procedura"]
+
+    # 3. QUERY AVANZATE (Usiamo i Dork per forzare i siti istituzionali)
     keyword_groups = [
-        '"diagnostica strutturale"',
-        '"prove di carico"',
-        '"indagini" AND "ponti"',
-        '"martinetti piatti"',
-        '"vulnerabilità sismica"',
-        '"valutazione sicurezza" AND "strutturale"'
+        'site:it "diagnostica strutturale" (CIG OR CUP OR bando)',
+        'site:it "prove di carico" (CIG OR CUP OR bando)',
+        'site:it "indagini" "ponti" (CIG OR CUP OR bando)',
+        'site:it "martinetti piatti" (CIG OR CUP OR bando)',
+        'site:it "vulnerabilità sismica" (CIG OR CUP OR bando)'
     ]
 
     archivio = leggi_archivio()
-    print("Avvio ricerca con filtri anti-sanità...")
+    print("Avvio scansione ad alta precisione...")
 
     for kw in keyword_groups:
-        # Costruiamo la query: (Siti Ufficiali) + (Keywords Ingegneria)
-        query = f"({domini_target}) {kw}"
-        query_encoded = urllib.parse.quote(query)
-        
-        # Usiamo il feed RSS di Google ma con filtri più pesanti
+        query_encoded = urllib.parse.quote(kw)
         rss_url = f"https://news.google.com/rss/search?q={query_encoded}&hl=it&gl=IT&ceid=IT:it"
         
         try:
@@ -55,26 +50,29 @@ def cerca_gare_laser():
                 link = item.find('link').text.lower()
                 gara_id = item.find('guid').text if item.find('guid') is not None else link
                 
-                # --- FILTRO DI SICUREZZA ---
-                # Salta se trova termini medici o giornali
-                if any(parola in titolo or parola in link for parola in blacklist_assoluta):
+                # FILTRO A: Esclusione termini indesiderati
+                if any(bad in titolo or bad in link for bad in blacklist):
                     continue
                 
-                # Accetta solo se è un bando/gara o se proviene da un sito ufficiale
-                is_official = any(x in link for x in ["portaleappalti", "acquistinretepa", "arca.", "gov.it"])
-                is_bando = any(x in titolo for x in ["bando", "gara", "appalto", "affidamento", "procedura"])
+                # FILTRO B: Presenza di termini burocratici (Whitelist)
+                contiene_tecnicismi = any(good in titolo or good in link for good in whitelist_tecnica)
                 
-                if (is_official or is_bando) and gara_id not in archivio:
+                # FILTRO C: Solo domini istituzionali o di gara
+                is_official = any(dom in link for dom in ["portaleappalti", "acquistinretepa", "arca.", "gov.it", "albofornitori", "trasparenza"])
+
+                if (is_official and contiene_tecnicismi) and gara_id not in archivio:
                     invio_messaggio(item.find('title').text, item.find('link').text)
                     salva_in_archivio(gara_id)
         except Exception as e:
             print(f"Errore su {kw}: {e}")
 
 def invio_messaggio(titolo, link):
+    # Pulizia del titolo dal nome del sito
     titolo_pulito = titolo.split(" - ")[0]
-    testo = f"⚖️ **BANDO TECNICO FILTRATO**\n\n📌 {titolo_pulito}\n\n🔗 [Link al portale]({link})"
+    testo = f"🏗 **BANDO TECNICO RILEVATO**\n\n📌 {titolo_pulito}\n\n🔗 [Link alla Gara]({link})"
+    
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
     requests.post(url, json={"chat_id": CHAT_ID, "text": testo, "parse_mode": "Markdown"})
 
 if __name__ == "__main__":
-    cerca_gare_laser()
+    cerca_gare_pure()
