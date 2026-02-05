@@ -1,7 +1,6 @@
 import requests
 import os
-import time
-from xml.etree import ElementTree
+from datetime import datetime, timedelta
 
 TOKEN = os.getenv('TELEGRAM_TOKEN')
 CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
@@ -12,49 +11,53 @@ def leggi_archivio():
     with open(DB_FILE, "r") as f: return f.read().splitlines()
 
 def salva_in_archivio(gara_id):
-    with open(DB_FILE, "a") as f: f.write(gara_id + "\n")
+    with open(DB_FILE, "a") as f: f.write(str(gara_id) + "\n")
 
-def cerca_su_portali_istituzionali():
-    # Definiamo le radici dei portali d'appalto più comuni in Italia
-    # Molti comuni usano il software "Maggioli" o "DigitalPA" che risiedono su portaleappalti.it
-    portali = [
-        "https://www.arca.regione.lombardia.it", # Sintel
-        "https://portaleappalti.it",             # Rete nazionale
-        "https://www.acquistinretepa.it"         # MEPA
+def cerca_gare_anac():
+    # Definiamo le tue parole chiave tecniche
+    keywords = [
+        "diagnostica strutturale", "prove di carico", "indagini ponti", 
+        "martinetti piatti", "vulnerabilità sismica", "valutazione sicurezza"
     ]
     
-    # Parole chiave puramente tecniche (Rimosso "diagnostica" generico)
-    keywords = [
-        "diagnostica strutturale",
-        "prove di carico",
-        "indagini ponti viadotti",
-        "martinetti piatti",
-        "vulnerabilità sismica"
-    ]
-
     archivio = leggi_archivio()
-    print("Ricerca diretta sui portali in corso...")
+    # Cerchiamo gare pubblicate negli ultimi 7 giorni
+    data_inizio = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
+    
+    print(f"Interrogazione BDNCP ANAC dal {data_inizio}...")
 
+    # URL dell'API Pubblica dell'ANAC (Piattaforma Dati Aperta)
+    # Nota: Usiamo l'endpoint di ricerca testuale sugli oggetti di gara
+    api_url = "https://dati.anticorruzione.it/sparql"
+    
     for kw in keywords:
-        # Usiamo un motore di ricerca mirato che indicizza solo documenti ufficiali (Bing Custom o simili)
-        # Qui simuliamo l'estrazione dai portali più comuni
-        query = f'site:portaleappalti.it "{kw}"'
-        # Nota: Per fare questo in modo "puro" senza Google News, 
-        # usiamo l'API di ricerca di Bing o un crawler specifico.
-        # Al momento, per semplicità, useremo una ricerca filtrata via DuckDuckGo (molto meno "news" di Google)
-        
-        search_url = f"https://duckduckgo.com/html/?q={kw}+site%3Aportaleappalti.it"
-        headers = {'User-Agent': 'Mozilla/5.0'}
+        # Costruiamo una query professionale per cercare nell'oggetto del bando
+        # Questa è una simulazione semplificata dell'interrogazione ai dati aperti
+        # Per semplicità immediata, usiamo il motore di ricerca ANAC PVL
+        search_url = f"https://www.anticorruzione.it/rest/api/v1/pvl?search={kw}&dataPubblicazioneDa={data_inizio}"
         
         try:
-            # Qui il bot scarica la pagina dei risultati del portale
-            response = requests.get(search_url, headers=headers, timeout=20)
-            # Analisi dei risultati (Logica di estrazione link)
-            # ... (implementazione scraping specifica) ...
-            
-            print(f"Scansione completata per: {kw}")
+            response = requests.get(search_url, timeout=30)
+            if response.status_code == 200:
+                gare = response.json().get('content', [])
+                for gara in gare:
+                    gara_id = gara.get('id')
+                    titolo = gara.get('oggetto', 'Titolo non disponibile')
+                    link = f"https://www.anticorruzione.it/-/pvl-dettaglio/-/pvl/{gara_id}"
+                    
+                    if str(gara_id) not in archivio:
+                        invio_messaggio(titolo, link)
+                        salva_in_archivio(gara_id)
         except Exception as e:
-            print(f"Errore: {e}")
+            print(f"Errore su {kw}: {e}")
 
-# NOTA: Per un'efficacia del 100%, la soluzione migliore ora è creare 
-# uno script specifico per OGNI portale (Sintel, MEPA, etc.)
+def invio_messaggio(titolo, link):
+    testo = (f"🏛 **GARA UFFICIALE ANAC**\n\n"
+             f"📌 **Oggetto:** {titolo[:200]}...\n\n"
+             f"🔗 [Vedi Dettaglio su PVL]({link})")
+    
+    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+    requests.post(url, json={"chat_id": CHAT_ID, "text": testo, "parse_mode": "Markdown"})
+
+if __name__ == "__main__":
+    cerca_gare_anac()
