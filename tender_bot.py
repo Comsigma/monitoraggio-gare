@@ -27,11 +27,9 @@ def cerca_gare_pure():
 
     # 3. QUERY AVANZATE (Usiamo i Dork per forzare i siti istituzionali)
     keyword_groups = [
+        'site:portaleappalti.it "manutenzione"',  # Test per sbloccare il bot
         'site:it "diagnostica strutturale" (CIG OR CUP OR bando)',
-        'site:it "prove di carico" (CIG OR CUP OR bando)',
-        'site:it "indagini" "ponti" (CIG OR CUP OR bando)',
-        'site:it "martinetti piatti" (CIG OR CUP OR bando)',
-        'site:it "vulnerabilità sismica" (CIG OR CUP OR bando)'
+        # ... le altre tue parole chiave ...
     ]
 
     archivio = leggi_archivio()
@@ -76,3 +74,4 @@ def invio_messaggio(titolo, link):
 
 if __name__ == "__main__":
     cerca_gare_pure()
+
